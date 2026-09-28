@@ -1,0 +1,54 @@
+import os
+import asyncio
+import logging
+from dotenv import load_dotenv
+
+from aiogram import Bot, Dispatcher, types
+from aiogram.filters import CommandStart
+from aiogram.enums import ChatAction
+from aiogram.utils.chat_action import ChatActionSender
+
+from gemini_client import ask_gemini
+
+# Загружаем переменные из .env
+load_dotenv()
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise ValueError("Переменная BOT_TOKEN не задана в окружении или файле .env")
+
+logging.basicConfig(level=logging.INFO)
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher()
+
+@dp.message(CommandStart())
+async def handle_start(message: types.Message):
+    await message.answer(
+        "Привет! Я твой персональный консультант по питанию. "
+        "Помогу разобрать рацион, составить меню без жестких запретов или разобраться в КБЖУ.\n\n"
+        "Расскажи, с чего начнем или какая у тебя цель?"
+    )
+
+@dp.message()
+async def handle_user_query(message: types.Message):
+    if not message.text:
+        return
+
+    # ChatActionSender удерживает статус «печатает...» в чате во время выполнения асинхронного блока
+    async with ChatActionSender(bot=bot, chat_id=message.chat.id, action=ChatAction.TYPING):
+        try:
+            reply = await ask_gemini(message.text)
+            await message.answer(reply)
+        except Exception as e:
+            logging.error(f"Ошибка при обработке запроса: {e}")
+            await message.answer(
+                "Кажется, сервер сейчас перегружен. Попробуй повторить сообщение через минутку!"
+            )
+
+async def main():
+    # Удаляем вебхуки, чтобы корректно запустился long polling
+    await bot.delete_webhook(drop_pending_updates=True)
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
