@@ -1,0 +1,38 @@
+import os
+import asyncio
+from google import genai
+from google.genai.errors import APIError
+from prompts import SYSTEM_PROMPT
+
+api_key = os.getenv("GEMINI_KEY")
+client = genai.Client(api_key=api_key)
+
+PRIMARY_MODEL = "gemini-flash-latest"
+FALLBACK_MODEL = "gemini-3.5-flash"
+
+async def ask_gemini(user_message: str) -> str:
+    """
+    Отправляет запрос к Gemini.
+    При возникновении ошибки 503 (Service Unavailable) повторяет запрос,
+    переключаясь на резервную модель gemini-3.5-flash.
+    """
+    try:
+        response = await asyncio.to_thread(
+            client.models.generate_content,
+            model=PRIMARY_MODEL,
+            contents=user_message,
+            config={"system_instruction": SYSTEM_PROMPT}
+        )
+        return response.text
+
+    except APIError as e:
+        if getattr(e, "code", None) == 503 or "503" in str(e):
+            # Повторный запрос со сменой модели
+            response = await asyncio.to_thread(
+                client.models.generate_content,
+                model=FALLBACK_MODEL,
+                contents=user_message,
+                config={"system_instruction": SYSTEM_PROMPT}
+            )
+            return response.text
+        raise e
